@@ -1,8 +1,10 @@
-name: Release arm64 DMG + Linux x64 deb
+name: Release the Apple Silicon DMG
 
-# Fork-only release pipeline: Apple Silicon DMG (unsigned, for local use) and the Linux x64 Debian package.
-# The upstream source tree is never modified: every step reuses the artifacts the checked-in tree pins,
-# and a clean-worktree gate fails the job if the build wrote any tracked file.
+# Fork-only release pipeline: an unsigned arm64 macOS DMG for local use. Upstream already publishes
+# every other artifact this fork needs (including the Linux x64 Debian package), so the fork adds only
+# the missing single-architecture build. The upstream source tree is never modified: every step reuses
+# the artifacts the checked-in tree pins, and a clean-worktree gate fails the job if the build wrote
+# a tracked file.
 
 on:
   workflow_dispatch:
@@ -108,65 +110,11 @@ jobs:
           path: dsh-desktop-next/dist/mac-smoke/*.dmg
           if-no-files-found: error
 
-  linux:
-    needs: prepare
-    if: needs.prepare.outputs.skip != 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22.23.2'
-      - run: corepack enable
-      - id: yarn-cache
-        run: echo "dir=$(yarn config get cacheFolder)" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
-        with:
-          path: ${{ steps.yarn-cache.outputs.dir }}
-          key: yarn-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('yarn.lock', '.yarnrc.yml') }}
-          restore-keys: |
-            yarn-${{ runner.os }}-${{ runner.arch }}-
-      - uses: actions/cache@v4
-        with:
-          path: |
-            dsh-desktop-next/.desktop-build/downloads
-            dsh-desktop-next/.desktop-build/runtime
-            ~/.cache/electron
-            ~/.cache/electron-builder
-            ~/.cache/node-gyp
-          key: packaging-${{ runner.os }}-${{ runner.arch }}-next-x64-${{ hashFiles('yarn.lock', 'deepseek-harness/scripts/primary-runtime/lock.json', 'dsh-desktop-next/package.json') }}
-          restore-keys: |
-            packaging-${{ runner.os }}-${{ runner.arch }}-next-x64-
-      - run: yarn install --immutable
-      - name: Reuse the Agents Anywhere artifact pinned by provenance
-        run: |
-          commit=$(node -p "require('./vendor/agents-anywhere/provenance.json').commit")
-          DSH_AA_SOURCE_REF="$commit" yarn aa:prepare-release
-      - run: yarn workspace dsh-community-market build
-      - run: yarn workspace dsh-desktop-next check:linux-package
-      - name: Package the Linux x64 Debian package
-        env:
-          DSH_PACKAGE_CHECK_ALREADY_RAN: '1'
-        run: yarn workspace dsh-desktop-next dist:linux
-      - name: Assert the source tree stayed identical
-        run: |
-          test -z "$(git status --porcelain)" || { git status --porcelain; echo '::error::the build modified tracked files'; exit 1; }
-      - run: ls -lh dsh-desktop-next/dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux-x64
-          path: dsh-desktop-next/dist/*-amd64.deb
-          if-no-files-found: error
-
   release:
-    needs: [prepare, mac, linux]
+    needs: [prepare, mac]
     if: |
       needs.prepare.outputs.skip != 'true'
-      && needs.mac.result == 'success' && needs.linux.result == 'success'
+      && needs.mac.result == 'success'
       && needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     steps:
